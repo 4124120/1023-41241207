@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>打磚塊遊戲</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            height: 100vh;
+            background: #f0f0f0;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            background: #fff;
+            border: 2px solid #333;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+        h1, h2 {
+            color: #333;
+        }
+        #score1, #score2, #lives, #timer {
+            font-size: 20px;
+            color: #333;
+            margin: 10px;
+        }
+        #difficulty, #modeSelection {
+            margin: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        .hidden {
+            display: none;
+        }
+        .scores {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            max-width: 400px;
+        }
+    </style>
+</head>
+<body>
+    <h1>打磚塊遊戲</h1>
+    <div id="modeSelection">
+        <h2>選擇遊戲模式:</h2>
+        <button onclick="selectMode('single')">單人模式</button>
+        <button onclick="selectMode('multiplayer')">雙人對打</button>
+    </div>
+    <div id="difficulty" class="hidden">
+        <h2>選擇難度:</h2>
+        <button onclick="startGame('easy')">簡單</button>
+        <button onclick="startGame('medium')">中等</button>
+        <button onclick="startGame('hard')">困難</button>
+        <button onclick="startGame('timeChallenge')">10秒極限</button>
+    </div>
+    <div class="scores">
+        <div id="score1">玩家1分數: 0</div>
+        <div id="lives">生命: 3</div>
+        <div id="score2" class="hidden">玩家2分數: 0</div>
+        <div id="timer" class="hidden">時間: 10秒</div>
+    </div>
+    <canvas id="gameCanvas" width="480" height="320"></canvas>
+    <div id="winMessage" class="hidden">恭喜你過關！準備進入下一關...</div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let ballRadius = 10;
+        let x, y, dx, dy;
+        const paddleHeight = 10;
+        const paddleWidth = 75;
+        let paddleX1, paddleX2;
+        let rightPressed2 = false;
+        let leftPressed2 = false;
+
+        const brickRowCount = 5;
+        const brickColumnCount = 3;
+        const brickWidth = 75;
+        const brickHeight = 20;
+        const brickPadding = 10;
+        const brickOffsetTop = 30;
+        const brickOffsetLeft = 30;
+
+        let bricks = [];
+        let score1 = 0;
+        let score2 = 0;
+        let lives = 3;
+        let difficulty = 'medium';
+        let powerUp = { x: 0, y: 0, radius: 10, active: false };
+        let gameTime = 10; // 10秒計時器
+        let timerInterval;
+        let explosionParticles = []; // 儲存爆炸粒子
+
+        function initBricks() {
+            bricks = [];
+            for (let c = 0; c < brickColumnCount; c++) {
+                bricks[c] = [];
+                for (let r = 0; r < brickRowCount; r++) {
+                    let hitCount = (Math.random() < 0.2) ? 0 : (difficulty === 'easy' ? 1 : (difficulty === 'medium' ? (r + c) % 2 === 0 ? 1 : 2 : 3));
+                    bricks[c][r] = { x: 0, y: 0, status: hitCount };
+                }
+            }
+        }
+
+        function selectMode(selectedMode) {
+            mode = selectedMode;
+            document.getElementById('modeSelection').classList.add('hidden');
+            document.getElementById('difficulty').classList.remove('hidden');
+        }
+
+        function startGame(selectedDifficulty) {
+            difficulty = selectedDifficulty;
+            score1 = 0;
+            score2 = 0;
+            lives = 3;
+            gameTime = 10; // 重置計時器
+            document.getElementById('score1').innerText = '玩家1分數: ' + score1;
+            document.getElementById('score2').innerText = '玩家2分數: ' + score2;
+            document.getElementById('lives').innerText = '生命: ' + lives;
+            document.getElementById('timer').innerText = '時間: ' + gameTime;
+
+            if (mode === 'multiplayer') {
+                document.getElementById('score2').classList.remove('hidden');
+            } else {
+                document.getElementById('score2').classList.add('hidden');
+            }
+
+            x = canvas.width / 2;
+            y = canvas.height - 30;
+            dx = difficulty === 'easy' ? 2 : difficulty === 'medium' ? 3 : 4;
+            dy = -2;
+            paddleX1 = (canvas.width - paddleWidth) / 2;
+
+            if (mode === 'multiplayer') {
+                paddleX2 = (canvas.width - paddleWidth) / 2; 
+            }
+
+            initBricks();
+            spawnPowerUp();
+            if (difficulty === 'timeChallenge') {
+                startTimer();
+            }
+            draw();
+        }
+
+        function startTimer() {
+            timerInterval = setInterval(() => {
+                gameTime--;
+                document.getElementById('timer').innerText = '時間: ' + gameTime + '秒';
+                if (gameTime <= 0) {
+                    clearInterval(timerInterval);
+                    alert('時間到！遊戲結束！');
+                    document.location.reload();
+                }
+            }, 1000);
+        }
+
+        document.addEventListener('keydown', keyDownHandler, false);
+        document.addEventListener('keyup', keyUpHandler, false);
+        canvas.addEventListener('mousemove', mouseMoveHandler1, false);
+
+        function keyDownHandler(e) {
+            if (mode === 'multiplayer') {
+                if (e.key === 'Right' || e.key === 'ArrowRight') {
+                    rightPressed2 = true;
+                } else if (e.key === 'Left' || e.key === 'ArrowLeft') {
+                    leftPressed2 = true;
+                }
+            }
+        }
+
+        function keyUpHandler(e) {
+            if (mode === 'multiplayer') {
+                if (e.key === 'Right' || e.key === 'ArrowRight') {
+                    rightPressed2 = false;
+                } else if (e.key === 'Left' || e.key === 'ArrowLeft') {
+                    leftPressed2 = false;
+                }
+            }
+        }
+
+        function mouseMoveHandler1(e) {
+            const relativeX = e.clientX - canvas.getBoundingClientRect().left;
+            if (relativeX > 0 && relativeX < canvas.width) {
+                paddleX1 = relativeX - paddleWidth / 2;
+            }
+        }
+
+        function collisionDetection() {
+            for (let c = 0; c < brickColumnCount; c++) {
+                for (let r = 0; r < brickRowCount; r++) {
+                    let b = bricks[c][r];
+                    if (b.status > 0) {
+                        if (x > b.x && x < b.x + brickWidth && y > b.y && y < b.y + brickHeight) {
+                            dy = -dy;
+                            b.status--;
+                            score1++;
+                            document.getElementById('score1').innerText = '玩家1分數: ' + score1;
+
+                            // 添加爆炸特效
+                            createExplosion(b.x + brickWidth / 2, b.y + brickHeight / 2);
+
+                            if (!bricks.flat().some(brick => brick.status > 0)) {
+                                showWinMessage();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 碰撞檢測掉落物品
+            if (powerUp.active) {
+                if (y + ballRadius >= powerUp.y - powerUp.radius && y + ballRadius <= powerUp.y + powerUp.radius) {
+                    if (x > paddleX1 && x < paddleX1 + paddleWidth) {
+                        score1 += 5; // 玩家1加分
+                        document.getElementById('score1').innerText = '玩家1分數: ' + score1;
+                        powerUp.active = false; // 收集後不再顯示
+                    }
+                }
+                if (mode === 'multiplayer') {
+                    if (y + ballRadius >= powerUp.y - powerUp.radius && y + ballRadius <= powerUp.y + powerUp.radius) {
+                        if (x > paddleX2 && x < paddleX2 + paddleWidth) {
+                            score2 += 5; // 玩家2加分
+                            document.getElementById('score2').innerText = '玩家2分數: ' + score2;
+                            powerUp.active = false; // 收集後不再顯示
+                        }
+                    }
+                }
+            }
+        }
+
+        function createExplosion(x, y) {
+            for (let i = 0; i < 10; i++) {
+                explosionParticles.push({ x, y, radius: Math.random() * 5 + 2, alpha: 1 });
+            }
+        }
+
+        function drawExplosion() {
+            for (let i = explosionParticles.length - 1; i >= 0; i--) {
+                let particle = explosionParticles[i];
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 165, 0, ${particle.alpha})`; // 橙色
+                ctx.fill();
+                particle.alpha -= 0.05;
+                particle.radius += 0.1;
+
+                if (particle.alpha <= 0) {
+                    explosionParticles.splice(i, 1); // 移除消失的粒子
+                }
+            }
+        }
+
+        function drawBall() {
+            ctx.beginPath();
+            ctx.arc(x, y, ballRadius, 0, Math.PI * 2);
+            ctx.fillStyle = '#0095DD';
+            ctx.fill();
+            ctx.closePath();
+        }
+
+        function drawPaddle() {
+            ctx.beginPath();
+            ctx.rect(paddleX1, canvas.height - paddleHeight, paddleWidth, paddleHeight);
+            ctx.fillStyle = '#0095DD';
+            ctx.fill();
+            ctx.closePath();
+
+            if (mode === 'multiplayer') {
+                ctx.beginPath();
+                ctx.rect(paddleX2, canvas.height - paddleHeight * 2, paddleWidth, paddleHeight);
+                ctx.fillStyle = '#FF6347';
+                ctx.fill();
+                ctx.closePath();
+            }
+        }
+
+        function drawBricks() {
+            for (let c = 0; c < brickColumnCount; c++) {
+                for (let r = 0; r < brickRowCount; r++) {
+                    let b = bricks[c][r];
+                    if (b.status > 0) {
+                        let brickX = c * (brickWidth + brickPadding) + brickOffsetLeft;
+                        let brickY = r * (brickHeight + brickPadding) + brickOffsetTop;
+                        b.x = brickX;
+                        b.y = brickY;
+
+                        ctx.beginPath();
+                        ctx.rect(brickX, brickY, brickWidth, brickHeight);
+                        ctx.fillStyle = (b.status === 2) ? '#FF6347' : '#0095DD';
+                        ctx.fill();
+                        ctx.closePath();
+                    }
+                }
+            }
+        }
+
+        function drawPowerUp() {
+            if (powerUp.active) {
+                ctx.beginPath();
+                ctx.arc(powerUp.x, powerUp.y, powerUp.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#FFD700'; // 黃色
+                ctx.fill();
+                ctx.closePath();
+            }
+        }
+
+        function showWinMessage() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#00FF00';
+            ctx.font = '30px Arial';
+            ctx.fillText('恭喜你過關！', canvas.width / 2 - 100, canvas.height / 2);
+            setTimeout(() => {
+                nextLevel();
+            }, 2000);
+        }
+
+        function nextLevel() {
+            alert("進入下一關！");
+            startGame(difficulty); // 重新開始相同難度
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawBricks();
+            drawBall();
+            drawPaddle();
+            drawPowerUp();
+            drawExplosion(); // 繪製爆炸特效
+            collisionDetection();
+
+            if (x + dx > canvas.width - ballRadius || x + dx < ballRadius) {
+                dx = -dx;
+            }
+            if (y + dy < ballRadius) {
+                dy = -dy;
+            } else if (y + dy > canvas.height - ballRadius) {
+                if (y > canvas.height - paddleHeight) {
+                    if (x > paddleX1 && x < paddleX1 + paddleWidth) {
+                        dy = -dy;
+                    } else if (mode === 'multiplayer' && y > canvas.height - paddleHeight * 2) {
+                        if (x > paddleX2 && x < paddleX2 + paddleWidth) {
+                            dy = -dy;
+                        } else {
+                            lives--;
+                            document.getElementById('lives').innerText = '生命: ' + lives;
+                            if (!lives) {
+                                alert('遊戲結束！');
+                                document.location.reload();
+                            } else {
+                                resetBallAndPaddles();
+                            }
+                        }
+                    } else {
+                        lives--;
+                        document.getElementById('lives').innerText = '生命: ' + lives;
+                        if (!lives) {
+                            alert('遊戲結束！');
+                            document.location.reload();
+                        } else {
+                            resetBallAndPaddles();
+                        }
+                    }
+                }
+            }
+
+            if (paddleX1 > canvas.width - paddleWidth) {
+                paddleX1 = canvas.width - paddleWidth;
+            } else if (paddleX1 < 0) {
+                paddleX1 = 0;
+            }
+
+            if (mode === 'multiplayer') {
+                if (rightPressed2 && paddleX2 < canvas.width - paddleWidth) {
+                    paddleX2 += 7;
+                } else if (leftPressed2 && paddleX2 > 0) {
+                    paddleX2 -= 7;
+                }
+            }
+
+            x += dx;
+            y += dy;
+            requestAnimationFrame(draw);
+        }
+
+        function resetBallAndPaddles() {
+            x = canvas.width / 2;
+            y = canvas.height - 30;
+            dx = difficulty === 'easy' ? 2 : difficulty === 'medium' ? 3 : 4;
+            dy = -2;
+            paddleX1 = (canvas.width - paddleWidth) / 2;
+            if (mode === 'multiplayer') {
+                paddleX2 = (canvas.width - paddleWidth) / 2;
+            }
+            spawnPowerUp(); // 每次重置都生成新的掉落物品
+        }
+
+        function spawnPowerUp() {
+            if (!powerUp.active) {
+                powerUp.x = Math.random() * (canvas.width - powerUp.radius * 2) + powerUp.radius;
+                powerUp.y = 0; // 從上方掉落
+                powerUp.active = true;
+            }
+        }
+
+        setInterval(() => {
+            if (powerUp.active) {
+                powerUp.y += 2; // 掉落速度
+                if (powerUp.y > canvas.height) {
+                    powerUp.active = false; // 掉落物品超出畫面
+                }
+            }
+        }, 100);
+
+        draw(); // 啟動遊戲
+    </script>
+</body>
+</html>
